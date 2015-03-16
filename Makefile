@@ -30,6 +30,9 @@ ifeq ($(origin KDIR), undefined)
 	ifeq "$(wildcard $(KDIR) )" ""
 		KDIR = /usr/src/kernels/$(shell uname -r)
 	endif
+	ifeq "$(wildcard $(KDIR) )" ""
+		KDIR = /usr/src/linux-headers-$(shell uname -r)
+	endif
 endif
 
 PWD := $(shell pwd)

@@ -20,6 +20,7 @@
 #include <linux/module.h>	/* Specifically, a module */
 #include <linux/kernel.h>	/* We're doing kernel work */
 #include <linux/cdev.h>
+#include <linux/version.h>
 
 #include "demux.h"
 #include "dmxdev.h"
@@ -107,5 +108,14 @@ int vtunerc_ctrldev_xchange_message(struct vtunerc_ctx *ctx,
 if (ctx->config && (ctx->config->debug))				\
 	printk(KERN_DEBUG "vtunerc%d: " fmt, ctx->idx, ##arg);	\
 } while (0)
+
+/* backward compatibility stuff */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
+static inline void *PDE_DATA(const struct inode *inode)
+{
+	return PROC_I(inode)->pde->data;
+}
+#endif
+
 
 #endif

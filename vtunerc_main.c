@@ -22,6 +22,7 @@
 #include <linux/i2c.h>
 #include <asm/uaccess.h>
 #include <linux/delay.h>
+#include <linux/seq_file.h>
 
 #include "demux.h"
 #include "dmxdev.h"
@@ -172,64 +173,56 @@ static char *get_fe_name(struct dvb_frontend_info *feinfo)
 	return (feinfo && feinfo->name) ? feinfo->name : "(not set)";
 }
 
-/**
- * @brief  procfs file handler
- * @param  buffer:
- * @param  start:
- * @param  offset:
- * @param  size:
- * @param  eof:
- * @param  data:
- * @return =0: success <br/>
- *         <0: if any error occur
- */
-#define MAXBUF 512
-int vtunerc_read_proc(char *buffer, char **start, off_t offset, int size,
-			int *eof, void *data)
+static int vtunerc_read_proc(struct seq_file *seq, void *v)
 {
-	char outbuf[MAXBUF] = "[ vtunerc driver, version "
-				VTUNERC_MODULE_VERSION " ]\n";
-	int blen, i, pcnt;
-	struct vtunerc_ctx *ctx = (struct vtunerc_ctx *)data;
+	int i, pcnt = 0;
+	struct vtunerc_ctx *ctx = (struct vtunerc_ctx *)seq->private;
 
-	blen = strlen(outbuf);
-	sprintf(outbuf+blen, "  sessions: %u\n", ctx->stat_ctrl_sess);
-	blen = strlen(outbuf);
-	sprintf(outbuf+blen, "  TS data : %u\n", ctx->stat_wr_data);
-	blen = strlen(outbuf);
-	sprintf(outbuf+blen, "  PID tab :");
-	pcnt = 0;
-	for (i = 0; i < MAX_PIDTAB_LEN; i++) {
-		blen = strlen(outbuf);
+	seq_printf(seq, "[ vtunerc driver, version "
+				VTUNERC_MODULE_VERSION " ]\n");
+	seq_printf(seq, "  sessions: %u\n", ctx->stat_ctrl_sess);
+	seq_printf(seq, "  TS data : %u\n", ctx->stat_wr_data);
+	seq_printf(seq, "  PID tab :");
+	for (i = 0; i < MAX_PIDTAB_LEN; i++)
 		if (ctx->pidtab[i] != PID_UNKNOWN) {
-			sprintf(outbuf+blen, " %x", ctx->pidtab[i]);
+			seq_printf(seq, " %x", ctx->pidtab[i]);
 			pcnt++;
 		}
-	}
-	blen = strlen(outbuf);
-	sprintf(outbuf+blen, " (len=%d)\n", pcnt);
-	blen = strlen(outbuf);
-	sprintf(outbuf+blen, "  FE type : %s\n", get_fe_name(ctx->feinfo));
+	seq_printf(seq, " (len=%d)\n", pcnt);
+	seq_printf(seq, "  FE type : %s\n", get_fe_name(ctx->feinfo));
 
-	blen = strlen(outbuf);
-	sprintf(outbuf+blen, "  msg xchg: %d/%d\n", ctx->ctrldev_request.type, ctx->ctrldev_response.type);
+	seq_printf(seq, "  msg xchg: %d/%d\n", ctx->ctrldev_request.type, ctx->ctrldev_response.type);
 
-	blen = strlen(outbuf);
-
-	if (size < blen)
-		return -EINVAL;
-
-	if (offset != 0)
-		return 0;
-
-	strcpy(buffer, outbuf);
-
-	/* signal EOF */
-	*eof = 1;
-
-	return blen;
-
+	return 0;
 }
+
+static int vtunerc_proc_open(struct inode *inode, struct file *file)
+{
+	int ret;
+	struct vtunerc_ctx *ctx = PDE_DATA(inode);
+
+	if (!try_module_get(THIS_MODULE))
+		return -ENODEV;
+	ret = single_open(file, vtunerc_read_proc, ctx);
+	if (ret)
+		module_put(THIS_MODULE);
+	return ret;
+}
+
+static int vtuner_proc_release(struct inode *inode, struct file *file)
+{
+	int ret = single_release(inode, file);
+	module_put(THIS_MODULE);
+	return ret;
+}
+
+static const struct file_operations vtunerc_read_proc_fops = {
+	.open		= vtunerc_proc_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= vtuner_proc_release,
+	};
+
 #endif
 
 static char *my_strdup(const char *s)
@@ -342,8 +335,8 @@ static int __init vtunerc_init(void)
 			sprintf(procfilename, VTUNERC_PROC_FILENAME,
 					ctx->idx);
 			ctx->procname = my_strdup(procfilename);
-			if (create_proc_read_entry(ctx->procname, 0, NULL,
-							vtunerc_read_proc,
+			if (proc_create_data(ctx->procname, 0, NULL,
+							&vtunerc_read_proc_fops,
 							ctx) == 0)
 				printk(KERN_WARNING
 					"vtunerc%d: Unable to register '%s' proc file\n",
